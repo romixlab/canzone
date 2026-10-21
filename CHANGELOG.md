@@ -104,6 +104,8 @@ All notable changes to this crate are recorded here, newest first. The format fo
 
 ### Fixed
 
+- The `defmt` feature enables the `defmt` dependency, so it works without the default features. (P6)
+- Unused `IdReg` methods removed; the crate builds without warnings again.
 - `into_powered_down` timed out waiting for INIT to clear in clock stop mode; INIT now stays set (M3, M5).
   Found by `hil/b129` `config_mode_and_back`.
 - The interrupt handler cleared every IR flag, so events nobody had handled were lost (e.g. RFxL for

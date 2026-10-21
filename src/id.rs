@@ -171,10 +171,6 @@ impl IdReg {
         Self(id.as_raw() << Self::EXTENDED_SHIFT | (1 << Self::XTD_SHIFT))
     }
 
-    pub(crate) fn as_raw_id(&self) -> u32 {
-        self.0 & Self::EXTENDED_MASK
-    }
-
     // pub(crate) fn from_register(id: u32, rtr: RemoteTransmissionRequest, xtd: IdType) -> Self {
     //     let rtr: u32 = match rtr {
     //         RemoteTransmissionRequest::TransmitDataFrame => 0,
@@ -186,17 +182,6 @@ impl IdReg {
     //     };
     //     Self(id | rtr | xtd)
     // }
-
-    /// Sets the remote transmission (RTR) flag. This marks the identifier as
-    /// being part of a remote frame.
-    #[must_use = "returns a new IdReg without modifying `self`"]
-    pub(crate) fn with_rtr(self, rtr: bool) -> Self {
-        if rtr {
-            Self(self.0 | (1 << Self::RTR_SHIFT))
-        } else {
-            Self(self.0 & !Self::RTR_MASK)
-        }
-    }
 
     /// Returns the identifier.
     pub fn to_id(self) -> Id {
@@ -216,11 +201,6 @@ impl IdReg {
     /// Returns `true` if the identifier is an extended identifier.
     pub fn is_extended(self) -> bool {
         (self.0 & Self::XTD_MASK) != 0
-    }
-
-    /// Returns `true` if the identifier is a standard identifier.
-    pub fn is_standard(self) -> bool {
-        !self.is_extended()
     }
 
     /// Returns `true` if the identifer is part of a remote frame (RTR bit set).

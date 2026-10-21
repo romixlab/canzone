@@ -291,7 +291,7 @@ pub enum FrameTransmissionConfig {
     AllowFdCanAndBRS,
 }
 
-///
+/// Kernel clock divider of the FDCAN block (CKDIV, FEATURES.md M7: not applied yet).
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ClockDivider {
