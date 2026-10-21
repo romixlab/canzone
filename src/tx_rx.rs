@@ -31,7 +31,6 @@ pub enum Dlc {
 }
 
 impl Dlc {
-    #[cfg(feature = "h7")]
     const fn len(&self) -> u8 {
         *self as u8
     }
@@ -95,18 +94,70 @@ pub struct TxFrameHeader {
     pub bit_rate_switching: bool,
     /// Whether this node is error passive or not
     pub error_state: Esi,
+    /// Remote frame (RTR): no data is sent, the data length passed to the transmit call becomes the DLC (0..=8).
+    /// The M_CAN sends a classic remote frame even if `frame_format` is FD (Bosch M_CAN user manual, "Tx Buffer
+    /// Element", RTR).
+    pub remote: bool,
     pub marker: Option<u8>,
 }
 
 impl TxFrameHeader {
+    /// Classic CAN data frame.
+    pub fn classic(id: Id) -> Self {
+        Self {
+            frame_format: FrameFormat::Classic,
+            id,
+            bit_rate_switching: false,
+            error_state: Esi::EsiDependsOnErrorPassive,
+            remote: false,
+            marker: None,
+        }
+    }
+
+    /// CAN FD data frame with bit rate switching.
     pub fn fd_brs(id: Id) -> Self {
         Self {
             frame_format: FrameFormat::FD,
             id,
             bit_rate_switching: true,
             error_state: Esi::EsiDependsOnErrorPassive,
+            remote: false,
             marker: None,
         }
+    }
+
+    /// Classic remote frame (RTR); pass the requested data length to the transmit call.
+    pub fn remote(id: Id) -> Self {
+        Self {
+            remote: true,
+            ..Self::classic(id)
+        }
+    }
+
+    /// DLC for `len` data bytes, checked against the frame kind and the TX element's data size.
+    pub(crate) fn dlc(&self, len: usize, element_data_size: u8) -> Result<Dlc, Error> {
+        let Some(dlc) = Dlc::from_len(len) else {
+            return Err(Error::WrongDataSize);
+        };
+        // Remote frames carry no data, so the element size doesn't matter, but their DLC is a classic one.
+        let max = if self.remote { 8 } else { element_data_size };
+        if dlc.len() > max {
+            return Err(Error::WrongDataSize);
+        }
+        Ok(dlc)
+    }
+}
+
+/// Copies `data` into the data words of a TX element; the last word is padded with zeros. Remote frames send no
+/// data, nothing is copied.
+fn fill_data(words: &mut [u32], header: &TxFrameHeader, data: &[u8]) {
+    if header.remote {
+        return;
+    }
+    for (d, chunk) in words.iter_mut().zip(data.chunks(4)) {
+        let mut word = [0u8; 4];
+        word[..chunk.len()].copy_from_slice(chunk);
+        *d = u32::from_le_bytes(word);
     }
 }
 
@@ -211,25 +262,12 @@ impl<M: Transmit> FdCan<M> {
             return Err(Error::WrongInstance);
         }
         let mut tx_buffer = self.message_ram().tx_buffer(idx)?;
-        let Some(dlc) = Dlc::from_len(data.len()) else {
-            return Err(Error::WrongDataSize);
-        };
-        if dlc.len() > self.config.layout.tx_buffers_data_size.max_len() {
-            return Err(Error::WrongDataSize);
-        }
-
+        let dlc = tx_header.dlc(
+            data.len(),
+            self.config.layout.tx_buffers_data_size.max_len(),
+        )?;
         tx_buffer.fill(&tx_header, dlc);
-
-        let mut chunks = data.chunks(4);
-        for d in tx_buffer.data {
-            let Some(chunk) = chunks.next() else {
-                break;
-            };
-            // The last chunk may be shorter than 4 bytes, pad it with zeros.
-            let mut word = [0u8; 4];
-            word[..chunk.len()].copy_from_slice(chunk);
-            *d = u32::from_le_bytes(word);
-        }
+        fill_data(tx_buffer.data, &tx_header, data);
 
         // Set as ready to transmit
         _ = self.tx_buffer_pend(idx);
@@ -317,35 +355,62 @@ impl<M: Transmit> FdCan<M> {
     }
 }
 
-/// FDCAN lite cores (G0, G4, L5, H5): fixed RAM layout with a 3-element TX FIFO, no dedicated TX buffers.
-#[cfg(not(feature = "h7"))]
 impl<M: Transmit> FdCan<M> {
     /// Queues a frame in the TX FIFO (elements are sent in the order they were put) and requests transmission.
     ///
-    /// Returns the buffer index, usable with [FdCan::abort_blocking]. [Error::TxQueueFull] if all 3 elements are
-    /// pending. `data.len()` must be a valid CAN FD length (0..=8, 12, 16, 20, 24, 32, 48, 64).
-    pub fn transmit(&mut self, tx_header: TxFrameHeader, data: &[u8]) -> Result<TxBufferIdx, Error> {
-        let Some(dlc) = Dlc::from_len(data.len()) else {
-            return Err(Error::WrongDataSize);
-        };
-        if self.tx_queue_is_full() {
+    /// Returns the buffer index, usable with [FdCan::abort_blocking]. [Error::TxQueueFull] if every FIFO element
+    /// is pending (lite cores: 3 elements; H7: the FIFO size of the layout, [Error::NoTxFifo] without one).
+    /// `data.len()` must be a valid CAN FD length (0..=8, 12, 16, 20, 24, 32, 48, 64) that fits the TX element.
+    ///
+    /// TXFQS.TFQPI is the index of the element to write next, counted from the start of the TX buffer section, so
+    /// on H7 it lies behind the dedicated buffers (Bosch M_CAN user manual, "Tx FIFO"). The FIFO is used in FIFO
+    /// mode (TXBC.TFQM = 0, the reset value); the queue mode isn't supported.
+    pub fn transmit(
+        &mut self,
+        tx_header: TxFrameHeader,
+        data: &[u8],
+    ) -> Result<TxBufferIdx, Error> {
+        #[cfg(feature = "h7")]
+        if self.config.layout.tx_fifo_or_queue_len == 0 {
+            return Err(Error::NoTxFifo);
+        }
+        #[cfg(feature = "h7")]
+        let max = self.config.layout.tx_buffers_data_size.max_len();
+        #[cfg(not(feature = "h7"))]
+        let max = 64;
+        let dlc = tx_header.dlc(data.len(), max)?;
+        let status = self.can.txfqs().read();
+        if status.tfqf() {
             return Err(Error::TxQueueFull);
         }
-        // TX FIFO put index: the element the core will send next after the ones already queued.
         let idx = TxBufferIdx {
             instance: self.instance,
-            idx: self.can.txfqs().read().tfqpi(),
+            idx: status.tfqpi(),
         };
-        let mut tx_buffer = self.message_ram().tx_buffer(idx.idx)?;
+        let mut tx_buffer = self.message_ram().tx_fifo_element(idx.idx)?;
         tx_buffer.fill(&tx_header, dlc);
-        for (d, chunk) in tx_buffer.data.iter_mut().zip(data.chunks(4)) {
-            // The last chunk may be shorter than 4 bytes, pad it with zeros.
-            let mut word = [0u8; 4];
-            word[..chunk.len()].copy_from_slice(chunk);
-            *d = u32::from_le_bytes(word);
-        }
+        fill_data(tx_buffer.data, &tx_header, data);
         self.can.txbar().write(|w| w.set_ar(idx.idx(), true));
         Ok(idx)
+    }
+
+    /// Free elements in the TX FIFO (TXFQS.TFFL).
+    #[inline]
+    pub fn tx_fifo_free_level(&self) -> u8 {
+        self.can.txfqs().read().tffl()
+    }
+
+    /// Requests cancellation of every pending transmission (TXBCR = TXBRP) without waiting, and returns how many
+    /// were pending. A frame already on the bus still completes (TXBTO) or fails (TXBCF); see
+    /// [FdCan::abort_blocking] to wait for one buffer.
+    pub fn cancel_pending(&mut self) -> u32 {
+        let pending = self.can.txbrp().read().0;
+        if pending != 0 {
+            self.can
+                .txbcr()
+                .write_value(crate::pac::fdcan::regs::Txbcr(pending));
+        }
+        pending.count_ones()
     }
 }
 
@@ -456,6 +521,43 @@ mod tests {
         assert_eq!(h.len, 8);
         assert_eq!(h.timestamp, 0x1234);
         assert_eq!(h.filter_index, Some(3));
+    }
+
+    #[test]
+    fn tx_dlc_checks() {
+        let id = Id::Standard(StandardId::new(0x123).unwrap());
+        let data = TxFrameHeader::classic(id);
+        assert_eq!(data.dlc(8, 8).map(|d| d.reg_value()), Ok(8));
+        assert_eq!(
+            data.dlc(12, 8).map(|d| d.reg_value()),
+            Err(Error::WrongDataSize)
+        );
+        assert_eq!(
+            data.dlc(9, 64).map(|d| d.reg_value()),
+            Err(Error::WrongDataSize)
+        );
+        assert_eq!(
+            TxFrameHeader::fd_brs(id).dlc(64, 64).map(|d| d.reg_value()),
+            Ok(15)
+        );
+        // remote frames: classic DLC 0..=8 whatever the element size
+        let remote = TxFrameHeader::remote(id);
+        assert!(remote.remote);
+        assert_eq!(remote.dlc(8, 8).map(|d| d.reg_value()), Ok(8));
+        assert_eq!(
+            remote.dlc(12, 64).map(|d| d.reg_value()),
+            Err(Error::WrongDataSize)
+        );
+    }
+
+    #[test]
+    fn remote_frames_send_no_data() {
+        let id = Id::Standard(StandardId::new(0x123).unwrap());
+        let mut words = [0xAAAA_AAAAu32; 2];
+        fill_data(&mut words, &TxFrameHeader::remote(id), &[1, 2, 3, 4, 5]);
+        assert_eq!(words, [0xAAAA_AAAA; 2]);
+        fill_data(&mut words, &TxFrameHeader::classic(id), &[1, 2, 3, 4, 5]);
+        assert_eq!(words, [0x0403_0201, 0x0000_0005]);
     }
 
     #[test]

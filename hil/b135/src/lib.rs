@@ -160,6 +160,7 @@ pub fn classic(id: Id) -> TxFrameHeader {
         id,
         bit_rate_switching: false,
         error_state: Esi::EsiDependsOnErrorPassive,
+        remote: false,
         marker: None,
     }
 }

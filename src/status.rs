@@ -161,35 +161,66 @@ impl ProtocolStatus {
     }
 }
 
+/// Reads the status of an instance from another task or context than the one owning its [FdCan] (FEATURES.md
+/// E7): a status server next to the I/O task, for instance. Get one with [FdCan::status_reader]; it is `Copy`
+/// and `Send`, and stays valid in every mode.
+///
+/// It shares the per-instance latch of the reset-on-read PSR fields with the driver, so error codes are reported
+/// once, to whichever reader asks first. The same holds for the error logging counter (ECR.CEL, reset by every
+/// read). The FDCAN clock must stay enabled while it is used.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct StatusReader {
+    instance: crate::FdCanInstance,
+}
+
+impl StatusReader {
+    /// See [FdCan::error_counters].
+    pub fn error_counters(&self) -> ErrorCounters {
+        ErrorCounters::from_ecr(self.instance.regs().ecr().read())
+    }
+
+    /// See [FdCan::protocol_status].
+    pub fn protocol_status(&self) -> ProtocolStatus {
+        let psr = self.instance.regs().psr().read().0;
+        ProtocolStatus::from_psr(Psr(crate::interrupt::state(self.instance).take_psr(psr)))
+    }
+
+    /// See [FdCan::is_bus_off].
+    pub fn is_bus_off(&self) -> bool {
+        let psr = self.instance.regs().psr().read();
+        if psr.0 & PSR_RESET_ON_READ != crate::interrupt::PSR_NOTHING_LATCHED {
+            crate::interrupt::state(self.instance).latch_psr(psr.0);
+        }
+        psr.bo()
+    }
+}
+
 impl<M> FdCan<M> {
+    /// A [StatusReader] for this instance.
+    pub fn status_reader(&self) -> StatusReader {
+        StatusReader {
+            instance: self.instance,
+        }
+    }
+
     /// Reads the error counters. This resets the CAN error logging counter (CEL).
     #[inline]
     pub fn error_counters(&mut self) -> ErrorCounters {
-        ErrorCounters::from_ecr(self.can.ecr().read())
+        self.status_reader().error_counters()
     }
 
     /// Reads the protocol status, including errors seen by earlier PSR reads of the driver (see
     /// [ProtocolStatus]).
     #[inline]
     pub fn protocol_status(&mut self) -> ProtocolStatus {
-        let psr = self.can.psr().read().0;
-        ProtocolStatus::from_psr(Psr(self.state().take_psr(psr)))
-    }
-
-    /// Reads PSR for the driver's own use, keeping the reset-on-read fields for [Self::protocol_status].
-    #[inline]
-    pub(crate) fn read_psr(&self) -> Psr {
-        let psr = self.can.psr().read();
-        if psr.0 & PSR_RESET_ON_READ != crate::interrupt::PSR_NOTHING_LATCHED {
-            self.state().latch_psr(psr.0);
-        }
-        psr
+        self.status_reader().protocol_status()
     }
 
     /// Whether the node is bus-off (PSR.BO). Doesn't consume the error codes of [Self::protocol_status].
     #[inline]
     pub fn is_bus_off(&self) -> bool {
-        self.read_psr().bo()
+        self.status_reader().is_bus_off()
     }
 }
 

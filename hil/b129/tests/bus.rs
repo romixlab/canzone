@@ -55,6 +55,7 @@ mod tests {
                 id,
                 bit_rate_switching: fr.brs,
                 error_state: Esi::EsiDependsOnErrorPassive,
+                remote: false,
                 marker: None,
             };
             let deadline = Instant::now() + Duration::from_millis(FRAME_GAP_TIMEOUT_MS);
@@ -158,6 +159,7 @@ mod tests {
             id: Id::Standard(defmt::unwrap!(StandardId::new(fr.id as u16))),
             bit_rate_switching: false,
             error_state: Esi::EsiDependsOnErrorPassive,
+            remote: false,
             marker: None,
         };
         _ = can.transmit(h, &[1]);
@@ -175,6 +177,7 @@ mod tests {
             id: Id::Standard(defmt::unwrap!(StandardId::new(0x123))),
             bit_rate_switching: false,
             error_state: Esi::EsiDependsOnErrorPassive,
+            remote: false,
             marker: None,
         }
     }

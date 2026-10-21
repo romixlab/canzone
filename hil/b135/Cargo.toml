@@ -30,6 +30,10 @@ harness = false
 name = "test_mode"
 harness = false
 
+[[test]]
+name = "runtime"
+harness = false
+
 [dependencies]
 hil-common = { path = "../common" }
 mcan = { path = "../..", features = ["h7", "embassy", "defmt"] }

@@ -402,6 +402,24 @@ mod tests {
         assert!(idx.iter().all(|i| i.instance == FdCanInstance::FdCan1));
     }
 
+    /// TXFQS.TFQPI counts from the start of the TX buffer section: FIFO elements follow the dedicated buffers
+    /// (Bosch M_CAN user manual, "Tx FIFO"), each 18 words with 64-byte elements.
+    #[test]
+    fn tx_fifo_elements_follow_dedicated_buffers() {
+        let (l, _, _) = example_layout(message_ram_builder()).ok().unwrap();
+        // 3 dedicated buffers (0..3), FIFO elements 3..6
+        assert_eq!(l.tx_fifo_element_addr(2), None);
+        assert_eq!(l.tx_fifo_element_addr(3), Some(l.tx_buffers_addr + 3 * 18));
+        assert_eq!(l.tx_fifo_element_addr(5), Some(l.tx_buffers_addr + 5 * 18));
+        assert_eq!(l.tx_fifo_element_addr(6), None);
+        assert_eq!(l.tx_buffer_addr(3), None);
+        // the last FIFO element ends where the trigger memory starts
+        assert_eq!(
+            l.tx_fifo_element_addr(5).unwrap() + 18,
+            l.trigger_memory_addr
+        );
+    }
+
     #[test]
     fn next_instance_starts_fresh_after_previous() {
         let builder = message_ram_builder();

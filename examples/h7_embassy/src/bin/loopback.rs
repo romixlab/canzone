@@ -72,6 +72,7 @@ async fn main(_spawner: Spawner) {
                 id: *id,
                 bit_rate_switching: false,
                 error_state: Esi::EsiDependsOnErrorPassive,
+                remote: false,
                 marker: None,
             };
             unwrap!(can.write_tx_buffer_pend(tx, header, &data[..len]));

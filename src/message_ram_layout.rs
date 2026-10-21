@@ -129,6 +129,18 @@ impl MessageRamLayout {
         // At most 32 elements of 18 words, no overflow.
         Some(self.tx_buffers_addr + idx as u16 * self.tx_buffers_data_size.element_words())
     }
+
+    /// Word offset of TX element `idx` of the TX FIFO, counted like TXFQS.TFQPI from the start of the TX buffer
+    /// section (behind the dedicated buffers). `None` if it isn't a FIFO element of this layout.
+    pub(crate) const fn tx_fifo_element_addr(&self, idx: u8) -> Option<u16> {
+        // At most 32 elements in total.
+        let first = self.tx_buffers_len as u16;
+        let end = first + self.tx_fifo_or_queue_len as u16;
+        if (idx as u16) < first || idx as u16 >= end {
+            return None;
+        }
+        Some(self.tx_buffers_addr + idx as u16 * self.tx_buffers_data_size.element_words())
+    }
 }
 
 /// Words of the fixed per-instance message RAM block on FDCAN lite cores: 28 standard filters (1 word),
@@ -269,11 +281,30 @@ pub(crate) struct TxBufferElement {
 }
 
 impl TxBufferElement {
+    /// The element at word `offset` of the message RAM with `data_words` data words.
+    ///
+    /// # Safety
+    /// `offset .. offset + 2 + data_words` must lie inside the message RAM and belong to the caller's instance.
+    unsafe fn at(offset: usize, data_words: usize) -> Self {
+        unsafe {
+            let t0 = crate::pac::FDCAN_MSGRAM_ADDR.add(offset);
+            TxBufferElement {
+                t0: Reg::from_ptr(t0 as *mut _),
+                t1: Reg::from_ptr(t0.add(1) as *mut _),
+                data: core::slice::from_raw_parts_mut(t0.add(2), data_words),
+            }
+        }
+    }
+
     pub(crate) fn fill(&mut self, tx_header: &TxFrameHeader, dlc: Dlc) {
         self.t0.write(|w| {
             w.set_esi(tx_header.error_state);
             w.set_xtd(tx_header.id.into());
-            w.set_rtr(Rtr::TransmitDataFrame); // TODO: support for RTR?
+            w.set_rtr(if tx_header.remote {
+                Rtr::TransmitRemoteFrame
+            } else {
+                Rtr::TransmitDataFrame
+            });
             w.set_id(tx_header.id.reg_value());
         });
         self.t1.write(|w| {
@@ -297,14 +328,26 @@ impl<'a> MessageRam<'a> {
         let Some(offset) = self.layout.tx_buffer_addr(idx.idx) else {
             return Err(Error::TxBufferIndexOutOfRange);
         };
-        let tx_buffers_len = self.layout.tx_buffers_data_size.words() as usize;
+        // SAFETY: the buffer lies inside this instance's layout, which lies inside the message RAM.
         unsafe {
-            let tx_buffer_t0 = crate::pac::FDCAN_MSGRAM_ADDR.add(offset as usize);
-            Ok(TxBufferElement {
-                t0: Reg::from_ptr(tx_buffer_t0 as *mut _),
-                t1: Reg::from_ptr(tx_buffer_t0.add(1) as *mut _),
-                data: core::slice::from_raw_parts_mut(tx_buffer_t0.add(2), tx_buffers_len),
-            })
+            Ok(TxBufferElement::at(
+                offset as usize,
+                self.layout.tx_buffers_data_size.words() as usize,
+            ))
+        }
+    }
+
+    /// TX FIFO element `idx` (TXFQS.TFQPI).
+    pub(crate) fn tx_fifo_element(&self, idx: u8) -> Result<TxBufferElement, Error> {
+        let Some(offset) = self.layout.tx_fifo_element_addr(idx) else {
+            return Err(Error::TxBufferIndexOutOfRange);
+        };
+        // SAFETY: the element lies inside this instance's layout, which lies inside the message RAM.
+        unsafe {
+            Ok(TxBufferElement::at(
+                offset as usize,
+                self.layout.tx_buffers_data_size.words() as usize,
+            ))
         }
     }
 
@@ -363,21 +406,16 @@ impl MessageRam {
         unsafe { crate::pac::FDCAN_MSGRAM_ADDR.add(lite_region(self.instance).start) }
     }
 
-    /// TX buffer `idx` (the 3 elements of the TX FIFO / queue).
-    pub(crate) fn tx_buffer(&self, idx: u8) -> Result<TxBufferElement, Error> {
+    /// TX FIFO element `idx` (the 3 elements of the TX FIFO / queue).
+    pub(crate) fn tx_fifo_element(&self, idx: u8) -> Result<TxBufferElement, Error> {
         if idx >= lite::TX_BUFFER_ELEMENTS {
             return Err(Error::TxBufferIndexOutOfRange);
         }
-        unsafe {
-            let t0 = self
-                .base()
-                .add(lite::TX_BUFFERS + idx as usize * lite::ELEMENT_WORDS);
-            Ok(TxBufferElement {
-                t0: Reg::from_ptr(t0 as *mut _),
-                t1: Reg::from_ptr(t0.add(1) as *mut _),
-                data: core::slice::from_raw_parts_mut(t0.add(2), lite::ELEMENT_WORDS - 2),
-            })
-        }
+        let offset = lite_region(self.instance).start
+            + lite::TX_BUFFERS
+            + idx as usize * lite::ELEMENT_WORDS;
+        // SAFETY: inside this instance's block.
+        unsafe { Ok(TxBufferElement::at(offset, lite::ELEMENT_WORDS - 2)) }
     }
 
     /// Reads RX FIFO element `idx`, see the H7 variant.

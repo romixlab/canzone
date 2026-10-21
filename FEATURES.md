@@ -118,7 +118,7 @@ To do:
 | M3 | Clock disable (all instances in PoweredDown) | ✅ Done | ● | ● | HIL (B129A) | |
 | M4 | Core check (ENDN, CREL) | ✅ Done | ● | ● | – | Accepts only `CREL.REL == 3`. Verify against G0/G4 lite cores. |
 | M5 | Typestate modes: PoweredDown → Config → Normal / Restricted / BusMonitoring / Internal loopback / External loopback / Test | 🟡 Partial | ● | ● | HIL (B135B, test mode) | Transitions out of Config exist. `into_powered_down` keeps INIT set while CSR/CSA are set (clearing it timed out; fixed and HIL-tested on B129A, 2026-10-04; not yet on H7). Test mode: normal operation plus `set_tx_pin(TxPinControl)` / `rx_pin()` (TEST.TX / TEST.RX). HIL `hil/b135` `test_mode` (B135B): RX reads the idle bus; with TX held recessive a requested frame never fails, the core stays "transmitter" at SOF with no errors counted, so this can't be used to provoke errors. LBCK is only reachable through the loopback modes. |
-| M6 | Return from a running mode to Config mode | ⬜ Not started | ● | ○ | – | Needed for dynamic reconfiguration and bus-off recovery flows. |
+| M6 | Return from a running mode to Config mode | ✅ Done | ● | ○ | HIL prepared | `into_config_mode` from every `Operating` mode: INIT + CCE (CCE resets TXBRP, FIFO status, TXBTO/TXBCF, so pending frames are dropped), clears ASM/MON/TEST; layout and filters are kept. Automatic bus-off recovery is paused in Config mode so the handler can't clear INIT. HIL `hil/b135` `runtime` `reconfigure_at_run_time` built, not run yet (no probe, 2026-10-21). Used by B135 firmware for `configure` / `set_mode` / `set_filters`. |
 | M7 | Shared H7 resources: CKDIV (FDCAN1 only), CCU | ⬜ Not started | ○ | ○ | – | `clock_divider` is stored in the config but never applied. |
 | M8 | Sleep / wake-up | ⬜ Not started | ○ | ○ | – | |
 | M9 | Time-triggered CAN (TTCAN, FDCAN1 on H7) | 💭 Idea | ○ | ○ | – | The builder already reserves trigger memory. |
@@ -139,14 +139,14 @@ To do:
 | ID | Feature | Status | An | No | Tests | Notes |
 |---|---|---|---|---|---|---|
 | X1 | Dedicated TX buffers (allocate via builder, write + pend, re-pend) | 🟡 Partial | ○ | ● | HIL (B135B) | Addresses fixed (R1/R6). HIL: `hil/b135` `loopback` sends every frame through a dedicated buffer. Doesn't check TXBRP before overwriting a pending buffer. H7 only. `is_idle()` right after a request can still return `true`: TXBRP shows the request a few kernel clock cycles after the TXBAR write (B135B). Completion tracking (X4) must not rely on TXBRP alone. |
-| X2 | TX FIFO / priority queue transmit | ⬜ Not started | ● | ● | – | Only commented-out code ported from `fdcan`. |
-| X3 | Abort transmission (blocking) | 🟡 Partial | ○ | ● | – | `abort_blocking` exists. Async abort and multi-buffer abort are missing. |
+| X2 | TX FIFO / priority queue transmit | 🟡 Partial | ● | ● | H, HIL prepared | `transmit(header, data)` on every chip: writes the element at TXFQS.TFQPI (H7: counted from the TX buffer section start, behind the dedicated buffers; host-tested addressing), `Error::TxQueueFull` / `NoTxFifo`, `tx_fifo_free_level`. FIFO mode only (TFQM = 0); the priority queue mode is missing. HIL `hil/b135` `runtime` `tx_fifo_keeps_order`, `tx_fifo_fd_lengths` built, not run yet. Lite: HIL B129A. |
+| X3 | Abort transmission (blocking) | 🟡 Partial | ○ | ● | HIL prepared | `abort_blocking` (one buffer, waits), `cancel_pending` (every pending request, doesn't wait; HIL `runtime` `cancel_pending` built, not run). Async abort missing. |
 | X4 | TX completion tracking / backpressure (per-buffer waker, TXBTO/TXBCF) | ⬜ Not started | ● | ○ | – | Needed for host notifications on analyzers. Model to consider: hansihe/mcan `TxRef` (generation counters). |
 | X5 | TX event FIFO + message markers | ⬜ Not started | ● | ○ | – | Elements are written with `EFC=DontStoreTxEvents`; marker high byte is always 0. |
 | X6 | Time spent in TX queue (request → on-bus timestamp) | ⬜ Not started | ● | ○ | – | Needs X5 + TSCV read at request time + timestamps (S1). |
 | X7 | Transmit pause (TXP) | ✅ Done | ● | ● | – | |
 | X8 | Disable automatic retransmission (DAR) | ✅ Done | ● | ● | HIL (B135B) | `hil/b135` `errors` `bit_errors_count_up`: one attempt per request. Finding: re-requesting a dedicated buffer immediately after a failed attempt (TXBRP already clear, error frame still running) drops the request and sets IR.MRAF; with a 50 µs gap it works. Not handled by the driver yet. |
-| X9 | Remote frames (RTR) | ⬜ Not started | ○ | ○ | – | Always sends data frames. |
+| X9 | Remote frames (RTR) | ✅ Done | ○ | ○ | H, HIL prepared | `TxFrameHeader::remote` / `remote` field: RTR set, DLC from the length passed (0..=8), no data written. Received remote frames: `RxFrameHeader::rtr`. HIL `runtime` `remote_frames` built, not run. |
 | X10 | FD frames, BRS, ESI | 🟡 Partial | ● | ● | HIL (B135B) | FD frames of every length (0–64 bytes) with and without BRS at 1 / 4 Mbit/s pass in internal loopback (`hil/b135` `loopback` `fd_lengths_with_and_without_brs`). ESI not tested (needs an error-passive node). Not yet across real transceivers (Q5). |
 
 ## 5. Receive
@@ -166,8 +166,8 @@ To do:
 | ID | Feature | Status | An | No | Tests | Notes |
 |---|---|---|---|---|---|---|
 | F1 | Global filter (non-matching std/ext, reject remote) | ✅ Done | ● | ● | HIL (B135B) | H7 GFC, lite RXGFC. Fixed 2026-10-01: `set_global_filter` didn't store the filter in the config, so the next mode transition re-applied the old one (found by `hil/b135` `loopback` `global_filter_routes_to_fifo1`). Reject-remote not tested. |
-| F2 | Standard ID filter elements | ⬜ Not started | ○ | ● | – | Bitfield types exist in `pac/message_ram.rs`, unused. |
-| F3 | Extended ID filter elements + XIDAM mask | ⬜ Not started | ○ | ● | – | |
+| F2 | Standard ID filter elements | ✅ Done | ○ | ● | H, HIL prepared | H7: `StandardFilter` (`FilterMatch` range / dual / mask, `FilterAction` FIFO 0/1, reject, priority), `set_standard_filter(index, Option<_>)` in Config mode, bounds-checked against the layout. Encoding host-tested against the Bosch element layout. HIL `runtime` `filter_elements` built, not run. Lite cores: not yet (fixed list at word 0, needs RXGFC.LSS). |
+| F3 | Extended ID filter elements + XIDAM mask | 🟡 Partial | ○ | ● | H, HIL prepared | H7: `ExtendedFilter`, `set_extended_filter`, same as F2; ranges use EFT = 11 (no XIDAM). XIDAM itself isn't configurable (reset value: all 29 bits). Lite: not yet. |
 | F4 | High-priority message handling (HPM, HPMS) | 💭 Idea | ○ | ○ | – | |
 
 ## 7. Interrupts and async
@@ -191,6 +191,7 @@ To do:
 | E4 | Protocol exception handling (PXHD) | ✅ Done | ○ | ○ | – | |
 | E5 | Message RAM ECC/parity errors (BEC/BEU) | ⬜ Not started | ○ | ○ | – | |
 | E6 | Driver statistics via the `cnt` crate (per-instance `cnt::Counters<E>`: RX/TX frames, FIFO overruns / lost messages, error / bus-off events, …) | ⬜ Not started | ● | ○ | – | Use cnt *Instance counters* (`#[derive(cnt::Count)]` event enum, `&'static Counters<E>` passed in by the firmware), no hand-rolled counters. ISR-safe, lock-free. Users can compile them out with cnt's `disabled` feature. Instance counters rather than `cnt!`: `on_interrupt` is one call site for all instances, per-instance call sites would reserve words for unused instances, and only `Counters` can be read back on the target (Q9). Needs cnt ≥ 0.4.1 (`get` / `clear`, host builds). Checked 2026-10-03: instance counters link next to embedded-test on thumbv7em, build on thumbv6m, and parallel host tests with per-test statics pass. On B135B a throwaway embedded-test suite passed: `count` / `add` / `get`, u64 carry into the high word, `clear`, and a shared static reading 0 at the start of every test (target reset); `loopback`, `interrupts` and `errors` still pass with `cnt.x` linked. The firmware will likely need a larger `CNT_RAM_BUFFER_SIZE_WORDS` than the 64-word default (one block per instance). |
+| E7 | Status from another task (`StatusReader`) | ✅ Done | ● | ○ | HIL prepared | `FdCan::status_reader()`: `Copy` handle for protocol status, error counters and bus-off, shares the per-instance PSR latch with the driver (error codes reported once to whoever asks first; ECR.CEL likewise). HIL `runtime` `status_reader` built, not run. |
 
 ## 9. Bit timing
 
@@ -200,7 +201,7 @@ To do:
 | T2 | Transceiver delay compensation (TDCR, DBTP.TDC) | 🟡 Partial | ○ | ● | H | `TransceiverDelayCompensation` (offset TDCO, filter window TDCF, 0..=127 mtq; `at_sample_point` helper) via `DataBitTiming::with_tdc`, rejected for data prescaler > 2. Writes DBTP.TDC and TDCR. Not verified on hardware: needs FD + BRS at ≥ 2 Mbit/s through real transceivers (Q5/Q6); check TDCV readback. |
 | T3 | Predefined timing sets (consts per kernel clock / bitrate) | ⬜ Not started | ○ | ○ | – | |
 | T4 | Bitrate → timing calculator | 💭 Idea | ○ | ○ | – | |
-| T5 | Dynamic reconfiguration (e.g. auto-baud on analyzers) | 🟡 Partial | ● | ○ | – | Setters exist in ConfigMode and `apply_config` now applies TDC. Blocked by M6 and `apply_config` not applying timestamp / clock divider. |
+| T5 | Dynamic reconfiguration (e.g. auto-baud on analyzers) | 🟡 Partial | ● | ○ | – | Setters exist in ConfigMode and `apply_config` now applies TDC. M6 is done (`into_config_mode`); still open: `apply_config` doesn't apply timestamp / clock divider. |
 | T6 | Non-ISO mode, edge filtering, FD enable / BRS enable | ✅ Done | ○ | ○ | – | |
 
 ## 10. Timestamping

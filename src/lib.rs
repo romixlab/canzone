@@ -5,6 +5,8 @@ pub mod config;
 pub mod message_ram_builder;
 
 pub mod fdcan;
+#[cfg(feature = "h7")]
+pub mod filter;
 pub mod pac;
 pub mod util;
 
@@ -20,9 +22,12 @@ pub mod tx_rx;
 
 pub use config::{BitTimingError, DataBitTiming, NominalBitTiming, TransceiverDelayCompensation};
 pub use fdcan::{
-    ConfigMode, Error, FdCan, FdCanInstance, FdCanInstances, InternalLoopbackMode, PoweredDownMode,
-    TestMode, TxPinControl,
+    BusMonitoringMode, ConfigMode, Error, ExternalLoopbackMode, FdCan, FdCanInstance,
+    FdCanInstances, InternalLoopbackMode, NormalOperationMode, Operating, PoweredDownMode,
+    RestrictedOperationMode, TestMode, TxPinControl,
 };
+#[cfg(feature = "h7")]
+pub use filter::{ExtendedFilter, FilterAction, FilterMatch, StandardFilter};
 pub use id::{ExtendedId, Id, StandardId};
 pub use interrupt::{InterruptLine, Interrupts, on_interrupt};
 #[cfg(feature = "h7")]
@@ -31,7 +36,9 @@ pub use message_ram_layout::RxFifo;
 pub use message_ram_layout::TxBufferIdx;
 #[cfg(feature = "h7")]
 pub use message_ram_layout::{DataFieldSize, MessageRamLayout};
-pub use status::{Activity, ErrorCounters, ErrorState, LastErrorCode, ProtocolStatus};
+pub use status::{
+    Activity, ErrorCounters, ErrorState, LastErrorCode, ProtocolStatus, StatusReader,
+};
 pub use tx_rx::{RxFrameHeader, TxFrameHeader};
 
 #[cfg(feature = "rcc")]

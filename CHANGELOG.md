@@ -8,6 +8,20 @@ All notable changes to this crate are recorded here, newest first. The format fo
 
 ### Added
 
+- TX FIFO on H7: `FdCan::transmit` now works on every chip; on H7 it writes the element at TXFQS.TFQPI behind the
+  dedicated buffers of the layout (`Error::NoTxFifo` without a FIFO). `tx_fifo_free_level`, and `cancel_pending`
+  to cancel every pending transmission at once. (X2, X3)
+- Remote frames: `TxFrameHeader::remote`, `TxFrameHeader::classic`. (X9)
+- Standard and extended ID filter elements (H7): `StandardFilter`, `ExtendedFilter`, `FilterMatch` (range, dual,
+  mask), `FilterAction`; `FdCan<ConfigMode>::set_standard_filter` / `set_extended_filter` write them into the
+  layout's filter lists, `filter_counts`. `Error::FilterIndexOutOfRange`, `Error::InvalidFilter`. (F2, F3)
+- `FdCan::into_config_mode` from every running mode (`Operating` marker trait), for reconfiguration at run time;
+  filters and layout are kept, pending frames dropped. (M6, T5)
+- `StatusReader` (`FdCan::status_reader`): protocol status, error counters and bus-off from another task than the
+  one owning the instance, sharing the driver's PSR latch. `FdCan`'s own status calls go through it. (E7)
+- `Error` derives `Clone`, `Copy`, `Debug`, `PartialEq`, `Eq`; the mode types are exported from the crate root.
+- `hil/b135` `runtime` tests for all of the above (built, not run: no probe attached). (Q4)
+
 - `hil/run-bus.sh`, `hil/common`, `bus` tests in `hil/b129` and `hil/b135`: board <-> board HIL runner for B129A and
   B135B on one bus (frames and 1000-frame soak, both directions, counters must stay 0). Passes on the real
   boards, with the `ack_missing` and `standby_quiet` scenarios. (Q5a)
@@ -63,6 +77,7 @@ All notable changes to this crate are recorded here, newest first. The format fo
 
 ### Changed
 
+- **Breaking:** `TxFrameHeader` has a `remote` field. (X9)
 - **Breaking:** `NominalBitTiming` and `DataBitTiming` are built with `const fn new(…) -> Result<_, BitTimingError>`,
   taking plain integers instead of public `NonZero` fields, and are validated against the RM ranges. The
   `transceiver_delay_compensation: bool` field is replaced by `with_tdc`. (T1, T2)

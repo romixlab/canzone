@@ -77,6 +77,7 @@ mod tests {
                 id,
                 bit_rate_switching: fr.brs,
                 error_state: Esi::EsiDependsOnErrorPassive,
+                remote: false,
                 marker: None,
             };
             // Waits until the frame is on the bus (and ACKed: without an ACK it never completes).

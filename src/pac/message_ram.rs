@@ -161,6 +161,33 @@ impl StandardFilterConfiguration {
     }
 }
 
+/// Extended Message ID Filter element, first word F0 (Bosch M_CAN user manual, "Extended Message ID Filter
+/// Element"; RM0468 FDCAN "Extended message ID filter element"). Up to 64 elements of two words at
+/// XIDFC.FLESA.
+#[bitfield(u32, order = Msb, debug = false, defmt = cfg(feature = "defmt"))]
+pub struct ExtendedFilterElementF0 {
+    /// Extended Filter Element Configuration, same coding as SFEC.
+    #[bits(3)]
+    pub efec: StandardFilterConfiguration,
+    /// Extended Filter ID 1.
+    #[bits(29)]
+    pub efid1: u32,
+}
+
+/// Extended Message ID Filter element, second word F1.
+#[bitfield(u32, order = Msb, debug = false, defmt = cfg(feature = "defmt"))]
+pub struct ExtendedFilterElementF1 {
+    /// Extended Filter Type: 00 range EFID1..=EFID2 with XIDAM applied, 01 dual ID, 10 classic (EFID1 filter,
+    /// EFID2 mask), 11 range without XIDAM.
+    #[bits(2)]
+    pub eft: u8,
+    #[bits(1)]
+    _reserved: u8,
+    /// Extended Filter ID 2.
+    #[bits(29)]
+    pub efid2: u32,
+}
+
 /// The Tx Buffers section can be configured to hold dedicated Tx Buffers as well as a Tx FIFO / Tx Queue.
 ///
 /// In case that the Tx Buffers section is shared by dedicated Tx buffers and a Tx FIFO / Tx Queue:

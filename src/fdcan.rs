@@ -22,6 +22,10 @@ pub trait Transmit {}
 /// Allows for Receive Operations
 pub trait Receive {}
 
+/// A mode the instance takes part in bus traffic in (everything after Config mode): it can go back to
+/// [ConfigMode] with [FdCan::into_config_mode].
+pub trait Operating {}
+
 /// Allows for the FdCan Instance to enter ConfigMode or for it's clock to be disabled.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct PoweredDownMode;
@@ -36,6 +40,7 @@ pub struct ConfigMode;
 /// recessive.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct InternalLoopbackMode;
+impl Operating for InternalLoopbackMode {}
 impl Transmit for InternalLoopbackMode {}
 impl Receive for InternalLoopbackMode {}
 
@@ -47,12 +52,14 @@ impl Receive for InternalLoopbackMode {}
 /// FDCAN_TX transmit pin.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ExternalLoopbackMode;
+impl Operating for ExternalLoopbackMode {}
 impl Transmit for ExternalLoopbackMode {}
 impl Receive for ExternalLoopbackMode {}
 
 /// The normal use of the FdCan instance after configurations
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct NormalOperationMode;
+impl Operating for NormalOperationMode {}
 impl Transmit for NormalOperationMode {}
 impl Receive for NormalOperationMode {}
 
@@ -64,6 +71,7 @@ impl Receive for NormalOperationMode {}
 /// error logging (can_errors) is active.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct RestrictedOperationMode;
+impl Operating for RestrictedOperationMode {}
 impl Receive for RestrictedOperationMode {}
 
 ///  In Bus monitoring mode (for more details refer to ISO11898-1, 10.12 Bus monitoring),
@@ -76,6 +84,7 @@ impl Receive for RestrictedOperationMode {}
 /// of dominant bits.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct BusMonitoringMode;
+impl Operating for BusMonitoringMode {}
 impl Receive for BusMonitoringMode {}
 
 /// Normal operation with write access to the TEST register (CCCR.TEST): the TX pin can be overridden with
@@ -86,6 +95,7 @@ impl Receive for BusMonitoringMode {}
 /// modes for application.
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct TestMode;
+impl Operating for TestMode {}
 impl Transmit for TestMode {}
 impl Receive for TestMode {}
 
@@ -105,6 +115,7 @@ pub enum TxPinControl {
     Recessive,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Error {
     PeripheralTaken,
@@ -123,6 +134,12 @@ pub enum Error {
     WrongDataSize,
     /// The TX FIFO / queue has no free element (lite cores: 3 elements).
     TxQueueFull,
+    /// The message RAM layout has no TX FIFO (H7: `allocate_fifo_or_queue(0)`).
+    NoTxFifo,
+    /// The filter index lies outside the filter list of the layout.
+    FilterIndexOutOfRange,
+    /// A range filter with `from > to`, or a mask wider than the ID.
+    InvalidFilter,
     /// The buffer passed to a receive function is shorter than the received data. The frame stays in the FIFO.
     BufferTooSmall,
 }
@@ -511,6 +528,32 @@ impl FdCan<PoweredDownMode> {
         #[cfg(not(feature = "h7"))]
         self.zero_msg_ram(crate::message_ram_layout::lite_region(self.instance));
         Ok(())
+    }
+}
+
+impl<M: Operating> FdCan<M> {
+    /// Leaves the running mode for Config mode (FEATURES.md M6), e.g. to change bit timing, filters or the mode
+    /// at run time.
+    ///
+    /// Sets CCCR.INIT and CCE. The core finishes the frame on the bus and stops; setting CCE resets TXBRP, the
+    /// RX FIFO / TX FIFO status and TXBTO / TXBCF (Bosch M_CAN user manual, CCCR.CCE), so frames still pending
+    /// are dropped and the RX FIFOs read empty. The message RAM (filters, layout) is kept. The mode bits of the
+    /// old mode (ASM, MON, TEST and with it the TEST register) are cleared; the next `into_*` sets its own.
+    /// Automatic bus-off recovery is paused in Config mode, so the interrupt handler can't clear INIT; it is back
+    /// with the next mode.
+    pub fn into_config_mode(mut self) -> Result<FdCan<ConfigMode>, (Error, FdCan<M>)> {
+        self.state()
+            .automatic_bus_off_recovery
+            .store(false, portable_atomic::Ordering::Release);
+        if let Err(e) = self.enter_init_mode() {
+            return Err((e, self));
+        }
+        self.can.cccr().modify(|w| {
+            w.set_asm(false);
+            w.set_mon(false);
+            w.set_test(false);
+        });
+        Ok(self.into_mode())
     }
 }
 
