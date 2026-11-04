@@ -135,3 +135,7 @@ All notable changes to this crate are recorded here, newest first. The format fo
 - **Breaking:** unused `FIFONr`, replaced by the public `RxFifo`. (Y1)
 - `paste` dependency (unmaintained, RUSTSEC-2024-0436). (P11)
 - Unused `src/pac/rcc_g4.rs`. The generator recreates it when G4 support starts (P3).
+
+### Docs
+
+- docs: internal references removed

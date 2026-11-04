@@ -1,5 +1,5 @@
 warning: unexpected `cfg` condition value: `defmt`
-  --> /home/roman/git/mcan/hil/common/src/lib.rs:19:12
+  --> /path/to/mcan/hil/common/src/lib.rs:19:12
    |
 19 | #[cfg_attr(feature = "defmt", derive(defmt::Format))]
    |            ^^^^^^^^^^^^^^^^^ help: remove the condition
@@ -10,7 +10,7 @@ warning: unexpected `cfg` condition value: `defmt`
    = note: `#[warn(unexpected_cfgs)]` on by default
 
 warning: methods `as_raw_id`, `with_rtr`, and `is_standard` are never used
-   --> /home/roman/git/mcan/src/id.rs:174:19
+   --> /path/to/mcan/src/id.rs:174:19
     |
 151 | impl IdReg {
     | ---------- methods in this implementation
