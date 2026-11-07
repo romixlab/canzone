@@ -6,6 +6,8 @@ All notable changes to this crate are recorded here, newest first. The format fo
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-07
+
 ### Added
 
 - TX FIFO on H7: `FdCan::transmit` now works on every chip; on H7 it writes the element at TXFQS.TFQPI behind the
@@ -21,7 +23,6 @@ All notable changes to this crate are recorded here, newest first. The format fo
   one owning the instance, sharing the driver's PSR latch. `FdCan`'s own status calls go through it. (E7)
 - `Error` derives `Clone`, `Copy`, `Debug`, `PartialEq`, `Eq`; the mode types are exported from the crate root.
 - `hil/b135` `runtime` tests for all of the above (built, not run: no probe attached). (Q4)
-
 - `hil/run-bus.sh`, `hil/common`, `bus` tests in `hil/b129` and `hil/b135`: board <-> board HIL runner for B129A and
   B135B on one bus (frames and 1000-frame soak, both directions, counters must stay 0). Passes on the real
   boards, with the `ack_missing` and `standby_quiet` scenarios. (Q5a)
@@ -102,6 +103,12 @@ All notable changes to this crate are recorded here, newest first. The format fo
 - AGENTS.md / README: the macro guideline now targets HAL-style "whole driver in one `macro_rules!`" code.
   Macros that remove real repetition are fine. (P10)
 
+### Removed
+
+- **Breaking:** unused `FIFONr`, replaced by the public `RxFifo`. (Y1)
+- `paste` dependency (unmaintained, RUSTSEC-2024-0436). (P11)
+- Unused `src/pac/rcc_g4.rs`. The generator recreates it when G4 support starts (P3).
+
 ### Fixed
 
 - The `defmt` feature enables the `defmt` dependency, so it works without the default features. (P6)
@@ -129,12 +136,6 @@ All notable changes to this crate are recorded here, newest first. The format fo
   (P2)
 - Interrupt enable and clear masks no longer set reserved bits on lite cores.
 - Wrong doc comment on `crel()` ("Endian Register"), from a hand edit to the old generated file.
-
-### Removed
-
-- **Breaking:** unused `FIFONr`, replaced by the public `RxFifo`. (Y1)
-- `paste` dependency (unmaintained, RUSTSEC-2024-0436). (P11)
-- Unused `src/pac/rcc_g4.rs`. The generator recreates it when G4 support starts (P3).
 
 ### Docs
 
