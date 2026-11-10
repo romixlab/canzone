@@ -358,6 +358,17 @@ mod tests {
         assert_eq!(fd, [12, 16, 20, 24, 32, 48, 64]);
     }
 
+    /// Every byte as a DLC field: only the low 4 bits count; ISO 11898-1's table (RM0468 §61.4.1, Table 503).
+    #[test]
+    fn dlc_lengths_every_byte() {
+        const FD: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64];
+        for raw in 0..=u8::MAX {
+            let dlc = raw & 0x0F;
+            assert_eq!(dlc_to_len(raw, FrameFormat::Classic), dlc.min(8), "{raw}");
+            assert_eq!(dlc_to_len(raw, FrameFormat::FD), FD[dlc as usize], "{raw}");
+        }
+    }
+
     /// Bit positions from the Bosch M_CAN "Rx Buffer and FIFO Element" table.
     #[test]
     fn rx_element_layout() {

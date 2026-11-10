@@ -550,6 +550,50 @@ mod tests {
         );
     }
 
+    /// The DLC of `len` data bytes, written out from ISO 11898-1's table (RM0468 §61.4.1, Table 503).
+    fn dlc_code(len: usize) -> Option<u8> {
+        Some(match len {
+            0..=8 => len as u8,
+            12 => 9,
+            16 => 10,
+            20 => 11,
+            24 => 12,
+            32 => 13,
+            48 => 14,
+            64 => 15,
+            _ => return None,
+        })
+    }
+
+    /// Every length 0..=300 (and `usize::MAX`) against every TX element size: data frames take a length the
+    /// table has and the element holds, remote frames one of 0..=8 whatever the element.
+    #[test]
+    fn tx_dlc_every_length() {
+        let id = Id::Standard(StandardId::new(0x123).unwrap());
+        for max in [8u8, 12, 16, 20, 24, 32, 48, 64] {
+            for len in (0..=300).chain([usize::MAX]) {
+                let data = dlc_code(len)
+                    .filter(|_| len <= max as usize)
+                    .ok_or(Error::WrongDataSize);
+                let remote = dlc_code(len)
+                    .filter(|_| len <= 8)
+                    .ok_or(Error::WrongDataSize);
+                let code = |h: TxFrameHeader| h.dlc(len, max).map(|d| d.reg_value());
+                assert_eq!(code(TxFrameHeader::fd_brs(id)), data, "fd {len} in {max}");
+                assert_eq!(
+                    code(TxFrameHeader::classic(id)),
+                    data,
+                    "classic {len} in {max}"
+                );
+                assert_eq!(
+                    code(TxFrameHeader::remote(id)),
+                    remote,
+                    "remote {len} in {max}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn remote_frames_send_no_data() {
         let id = Id::Standard(StandardId::new(0x123).unwrap());
