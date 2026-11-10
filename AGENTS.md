@@ -113,6 +113,9 @@ unfinished features.
   - **Never enable cnt's `disabled` feature in a HIL crate.** Features unify across the build, `get` then
     returns 0 and "nothing went wrong" asserts pass without checking anything. Every HIL crate keeps the
     compile-time guard `const _: () = assert!(!cnt::DISABLED, ...)` in its `src/lib.rs`.
+- CAN FD lengths and DLCs come from exact_units (`OneOf<CanFdLengths>`, `Coded<CanFdDlc>`), never a local table.
+  exact_units is a git dependency without a rev (Cargo.lock pins the commit), so firmware that also takes it by git
+  (bedrock_can, wire_weaver) builds one copy.
 - Dependencies: keep them current, record bumps in FEATURES.md (P11), and re-build the example after every
   bump.
 

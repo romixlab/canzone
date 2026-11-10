@@ -1,4 +1,5 @@
 use bitfield_struct::bitfield;
+use exact_units::codec::{CanFdDlc, Codec};
 
 macro_rules! enum_bit {
     ($name:ident, $zero_name:ident, $one_name:ident) => {
@@ -325,19 +326,12 @@ pub(crate) struct RxElementR1 {
     pub rxts: u16,
 }
 
-/// Data length in bytes for a DLC. Classic frames carry at most 8 bytes, DLC 9..=15 still means 8
-/// (ISO 11898-1); CAN FD maps 9..=15 to 12, 16, 20, 24, 32, 48, 64.
-pub(crate) const fn dlc_to_len(dlc: u8, format: FrameFormat) -> u8 {
-    match (dlc & 0x0F, format) {
-        (d @ 0..=8, _) => d,
-        (_, FrameFormat::Classic) => 8,
-        (9, FrameFormat::FD) => 12,
-        (10, FrameFormat::FD) => 16,
-        (11, FrameFormat::FD) => 20,
-        (12, FrameFormat::FD) => 24,
-        (13, FrameFormat::FD) => 32,
-        (14, FrameFormat::FD) => 48,
-        (_, FrameFormat::FD) => 64,
+/// Data length in bytes for a DLC (its low 4 bits). Classic frames carry at most 8 bytes, DLC 9..=15 still means 8
+/// (ISO 11898-1); CAN FD maps 9..=15 to 12, 16, 20, 24, 32, 48, 64 (exact_units' `CanFdDlc`).
+pub(crate) fn dlc_to_len(dlc: u8, format: FrameFormat) -> u8 {
+    match format {
+        FrameFormat::Classic => (dlc & 0x0F).min(8),
+        FrameFormat::FD => CanFdDlc::formula(dlc & 0x0F).get(),
     }
 }
 

@@ -12,6 +12,9 @@ bitfield-struct = "0.13"
 portable-atomic = { version = "1.15", default-features = false }
 embassy-sync = { version = "0.8", optional = true }
 defmt = { version = "1.1", optional = true }
+# CAN FD lengths as a typed set (OneOf<CanFdLengths>) and their DLC (CanFdDlc). By git without a rev: Cargo.lock pins
+# the commit, so firmware that takes exact_units by git elsewhere too (bedrock_can, wire_weaver) builds one exact_units
+exact_units = { version = "0.1.0", git = "https://github.com/romixlab/exact_units", default-features = false, features = ["information"] }
 
 [features]
 default = ["defmt", "rcc"]

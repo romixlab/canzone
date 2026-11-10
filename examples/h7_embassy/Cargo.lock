@@ -576,6 +576,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "exact_units"
+version = "0.1.0"
+source = "git+https://github.com/romixlab/exact_units#a413902129a0e6619fe7276051b5fdbe1cc710ab"
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -726,6 +731,7 @@ dependencies = [
  "cortex-m",
  "defmt 1.1.1",
  "embassy-sync",
+ "exact_units",
  "portable-atomic",
  "static_cell",
 ]

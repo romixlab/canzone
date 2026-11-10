@@ -8,76 +8,17 @@ use crate::pac::message_ram::{RxElementR0, RxElementR1, Xtd, dlc_to_len};
 use crate::util::checked_wait;
 use crate::{Error, FdCan};
 use crate::{ExtendedId, StandardId};
+use exact_units::codec::{CanFdDlc, CanFdLengths, Coded};
+use exact_units::prefix::One;
+use exact_units::units::Byte;
+use exact_units::{Fixed, OneOf, Rounding};
 
-#[derive(Copy, Clone)]
-#[repr(u8)]
-pub enum Dlc {
-    _0Bytes = 0,
-    _1Bytes = 1,
-    _2Bytes = 2,
-    _3Bytes = 3,
-    _4Bytes = 4,
-    _5Bytes = 5,
-    _6Bytes = 6,
-    _7Bytes = 7,
-    _8Bytes = 8,
-    _12Bytes = 12,
-    _16Bytes = 16,
-    _20Bytes = 20,
-    _24Bytes = 24,
-    _32Bytes = 32,
-    _48Bytes = 48,
-    _64Bytes = 64,
-}
+/// A data length a DLC can say: 0..=8, 12, 16, 20, 24, 32, 48 or 64 bytes.
+type FrameLen = Fixed<Byte, One, u8, OneOf<CanFdLengths>>;
 
-impl Dlc {
-    const fn len(&self) -> u8 {
-        *self as u8
-    }
-
-    const fn from_len(len: usize) -> Option<Self> {
-        match len {
-            0 => Some(Self::_0Bytes),
-            1 => Some(Self::_1Bytes),
-            2 => Some(Self::_2Bytes),
-            3 => Some(Self::_3Bytes),
-            4 => Some(Self::_4Bytes),
-            5 => Some(Self::_5Bytes),
-            6 => Some(Self::_6Bytes),
-            7 => Some(Self::_7Bytes),
-            8 => Some(Self::_8Bytes),
-            12 => Some(Self::_12Bytes),
-            16 => Some(Self::_16Bytes),
-            20 => Some(Self::_20Bytes),
-            24 => Some(Self::_24Bytes),
-            32 => Some(Self::_32Bytes),
-            48 => Some(Self::_48Bytes),
-            64 => Some(Self::_64Bytes),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn reg_value(&self) -> u8 {
-        match self {
-            Dlc::_0Bytes => 0,
-            Dlc::_1Bytes => 1,
-            Dlc::_2Bytes => 2,
-            Dlc::_3Bytes => 3,
-            Dlc::_4Bytes => 4,
-            Dlc::_5Bytes => 5,
-            Dlc::_6Bytes => 6,
-            Dlc::_7Bytes => 7,
-            Dlc::_8Bytes => 8,
-            Dlc::_12Bytes => 9,
-            Dlc::_16Bytes => 10,
-            Dlc::_20Bytes => 11,
-            Dlc::_24Bytes => 12,
-            Dlc::_32Bytes => 13,
-            Dlc::_48Bytes => 14,
-            Dlc::_64Bytes => 15,
-        }
-    }
-}
+/// The data length code of a TX element: 0..=8 as themselves, 9..=15 for 12..=64 bytes (ISO 11898-1; RM0468
+/// §61.4.1, Table 503).
+pub(crate) type Dlc = Coded<CanFdDlc>;
 
 /// Header of a transmit request
 #[derive(Debug, Copy, Clone)]
@@ -136,15 +77,17 @@ impl TxFrameHeader {
 
     /// DLC for `len` data bytes, checked against the frame kind and the TX element's data size.
     pub(crate) fn dlc(&self, len: usize, element_data_size: u8) -> Result<Dlc, Error> {
-        let Some(dlc) = Dlc::from_len(len) else {
-            return Err(Error::WrongDataSize);
-        };
+        let len = u8::try_from(len)
+            .ok()
+            .and_then(|len| FrameLen::try_new(len).ok())
+            .ok_or(Error::WrongDataSize)?;
         // Remote frames carry no data, so the element size doesn't matter, but their DLC is a classic one.
         let max = if self.remote { 8 } else { element_data_size };
-        if dlc.len() > max {
+        if len.get() > max {
             return Err(Error::WrongDataSize);
         }
-        Ok(dlc)
+        // every length of the set has its own code: the rounding never applies
+        Dlc::try_new(len, Rounding::Ceil).map_err(|_| Error::WrongDataSize)
     }
 }
 
@@ -527,25 +470,19 @@ mod tests {
     fn tx_dlc_checks() {
         let id = Id::Standard(StandardId::new(0x123).unwrap());
         let data = TxFrameHeader::classic(id);
-        assert_eq!(data.dlc(8, 8).map(|d| d.reg_value()), Ok(8));
+        assert_eq!(data.dlc(8, 8).map(|d| d.raw()), Ok(8));
+        assert_eq!(data.dlc(12, 8).map(|d| d.raw()), Err(Error::WrongDataSize));
+        assert_eq!(data.dlc(9, 64).map(|d| d.raw()), Err(Error::WrongDataSize));
         assert_eq!(
-            data.dlc(12, 8).map(|d| d.reg_value()),
-            Err(Error::WrongDataSize)
-        );
-        assert_eq!(
-            data.dlc(9, 64).map(|d| d.reg_value()),
-            Err(Error::WrongDataSize)
-        );
-        assert_eq!(
-            TxFrameHeader::fd_brs(id).dlc(64, 64).map(|d| d.reg_value()),
+            TxFrameHeader::fd_brs(id).dlc(64, 64).map(|d| d.raw()),
             Ok(15)
         );
         // remote frames: classic DLC 0..=8 whatever the element size
         let remote = TxFrameHeader::remote(id);
         assert!(remote.remote);
-        assert_eq!(remote.dlc(8, 8).map(|d| d.reg_value()), Ok(8));
+        assert_eq!(remote.dlc(8, 8).map(|d| d.raw()), Ok(8));
         assert_eq!(
-            remote.dlc(12, 64).map(|d| d.reg_value()),
+            remote.dlc(12, 64).map(|d| d.raw()),
             Err(Error::WrongDataSize)
         );
     }
@@ -578,7 +515,7 @@ mod tests {
                 let remote = dlc_code(len)
                     .filter(|_| len <= 8)
                     .ok_or(Error::WrongDataSize);
-                let code = |h: TxFrameHeader| h.dlc(len, max).map(|d| d.reg_value());
+                let code = |h: TxFrameHeader| h.dlc(len, max).map(|d| d.raw());
                 assert_eq!(code(TxFrameHeader::fd_brs(id)), data, "fd {len} in {max}");
                 assert_eq!(
                     code(TxFrameHeader::classic(id)),

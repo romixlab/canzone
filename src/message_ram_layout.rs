@@ -313,7 +313,7 @@ impl TxBufferElement {
             w.set_tsce(TimeStampCaptureEnable::Disabled);
             w.set_fdf(tx_header.frame_format);
             w.set_brs(tx_header.bit_rate_switching.into());
-            w.set_dlc(dlc.reg_value());
+            w.set_dlc(dlc.raw());
             w.set_message_marker_high(0);
         });
     }
