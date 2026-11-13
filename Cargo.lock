@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "mcan"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bitfield-struct",
  "cortex-m",

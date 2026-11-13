@@ -6,6 +6,8 @@ All notable changes to this crate are recorded here, newest first. The format fo
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-13
+
 ### Changed
 
 - The CAN FD length table comes from [exact_units](https://github.com/romixlab/exact_units) (by git): a TX element's DLC is `Coded<CanFdDlc>` from a length checked as `OneOf<CanFdLengths>`, and received FD lengths decode through `CanFdDlc`. The crate-internal `Dlc` enum is gone (it had no public constructor). Every DLC and every length 0..=300 map as before, pinned by host tests. Cargo.lock pins exact_units a413902; since 2de6095 its OneOf and CanFdDlc work in the storage type and take a length to its code in one search: examples/h7_embassy is 4 B smaller. (P11, Q1)
